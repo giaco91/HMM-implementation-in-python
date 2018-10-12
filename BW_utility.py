@@ -1,3 +1,12 @@
+#------------------------------------------------------------------------
+#Author: Sandro Giacomuzzi
+#Part of my Master Thesis at ETHZ
+#Written at: 1.11.2018
+#------------------------------------------------------------------------
+
+
+
+
 import numpy as np
 import time
 
@@ -8,7 +17,7 @@ import time
 #pi, initial distribution of hidden states
 #a, transition matrice of the MC
 #e, emission probability distributions for each state
-#x, hidden the states
+#x, hidden states
 #z, observations (data)
 #f[n,k]=p(z_1,...,z_n,x_n=k)
 #b[n,k]=p(z_n+1,...,z_N|x_n=k)
@@ -105,8 +114,12 @@ def init(K,D):
 
     sequences=[]
     #cyclic sequence that can be learned perfectly for K>=3
-    z=np.array([[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0]]) #shape: (N,D) (1-hot encoding)
-    sequences.append(z)
+    z1=np.array([[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0]]) #shape: (N,D) (1-hot encoding)
+    z2=np.array([[1,0,0],[0,1,0],[0,1,0],[1,0,0],[0,1,0],[0,0,1],[1,0,0],[1,0,0]])
+    z3=np.array([[0,1,0],[0,0,1],[1,0,0],[0,1,0]])
+    sequences.append(z1)
+    sequences.append(z2)
+    sequences.append(z3)
 
     return pi,a,e,sequences
 
@@ -380,8 +393,28 @@ def viterbi(pi,a,e,z):
 
     return x_ml,ML
 
+def get_gamma_ceta(pi,a,e,z):
+    #z must be a sequence (unwrapped from the list)
+    K=a.shape[0] #number of hidden states
+    z_shape=z.shape
+    N=z_shape[0] #sequence length
+    D=z_shape[1] #number of output states (for discrete ouput space)
+
+    z_hot=one_hot_decoding(z)
+    [f_s,c,L]=forward_scaled(pi,a,e,z)
+    LL=np.log(L)
+    b_s=backward_scaled(a,e,z,c)
+
+    g=f_s*b_s
+    ceta=np.zeros((N,K,K))
+    for n in range(0,N-1):
+        for k in range(0,K):
+            for l in range(0,K):
+                ceta[n,l,k]=f_s[n,l]*a[l,k]*b_s[n+1,k]*e[k,z_hot[n+1]]/c[n+1]
+
+    return g,ceta,LL
+
 def baumwelch(pi,a,e,z,n_iter):
-    z=z[0]
     #pi, initial distribution of hidden states
     #a, transition matrice of the MC
     #e, emission probability distributions for each state
@@ -389,7 +422,7 @@ def baumwelch(pi,a,e,z,n_iter):
     #This function returns the ML parameters for the EM procedure
 
     #notation:
-    #g[n,l]=f[n,l]*b[n,l]/p(z^n)=p(x_n=l|z^n)
+    #g[n,l]=f[n,l]*b[n,l]/p(z^n)=p(x_n=l|z^n), responsibility
     #note: g[n,:] is a probabilidty vecator
     #ceta[n,l,k]=p(x_n=l,x_n+1 = k|z^n)
     #note: g[n,l]=np.sum(ceta,axis=2)
@@ -397,45 +430,65 @@ def baumwelch(pi,a,e,z,n_iter):
     start_time = time.time()
 
     K=a.shape[0] #number of hidden states
-    z_shape=z.shape
-    N=z_shape[0] #size of sequence
-    D=z_shape[1] #number of output states (for discrete ouput space)
+    D=z[0].shape[1] #number of output states (for discrete ouput space)
+    S=len(z) #amount of sequences
+    LL=np.zeros(n_iter+1)#store the log-likelihood
+    g_i=[]#store the responsibilities for all sequences
+    ceta_i=[]#store the cetas for all sequences
 
-    z_hot=one_hot_decoding(z)
-    improvement=np.zeros((n_iter))#store (ln((L_i)-ln(L_i-1))/ln(L_i-1)
-    LL=np.zeros(n_iter+1)
+    #-----first E-step------
+    for s in range(0,S):
+        [g,ceta,LL_s]=get_gamma_ceta(pi,a,e,z[s])
+        g_i.append(g)
+        ceta_i.append(ceta)
+        LL[0]+=LL_s #likelihood of sequnces are factors -> log-likelihood is sum
+    #improvement=np.zeros((n_iter))#store (ln((L_i)-ln(L_i-1))/ln(L_i-1)
+
     for iter in range(0,n_iter):
 
-        #----E-step---
-
-        [f_s,c,L]=forward_scaled(pi,a,e,z)
-        LL[iter]=np.log(L)
-        b_s=backward_scaled(a,e,z,c)
-
-        g=f_s*b_s
-        ceta=np.zeros((N,K,K))
-        for n in range(0,N-1):
-            for k in range(0,K):
-                for l in range(0,K):
-                    ceta[n,l,k]=f_s[n,l]*a[l,k]*b_s[n+1,k]*e[k,z_hot[n+1]]/c[n+1]
-
-
-        #---M-step---
-        #initial hidden state dirstribution pi
-        pi[:]=g[0,:]/np.sum(g[0,:])
+        #----M-step for multiple sequences----
+        
+        #initial hidden state distr.
+        g_1_sum=np.zeros(K)
+        g_partition=0
+        for s in range(0,S):
+            g_1_sum+=g_i[s][0,:]
+            g_partition+=np.sum(g_i[s][0,:])
+        pi[:]=g_1_sum/g_partition
 
         #state tranistion matrix a
-        ceta_sum=np.sum(ceta,axis=0)
-        g_sum=np.sum(ceta_sum,axis=1)#=np.sum(g[0:-1,:],axis=0)
-
-        
+        ceta_s_sum=np.zeros((K,K))
+        g_s_sum=np.zeros(K)
+        for s in range(0,S):
+            ceta_sum=np.sum(ceta_i[s],axis=0)
+            ceta_s_sum+=ceta_sum
+            g_s_sum+=np.sum(ceta_sum,axis=1)
         for k in range(0,K):
-            a[:,k]=ceta_sum[:,k]/g_sum[:]
-
+            a[:,k]=ceta_s_sum[:,k]/g_s_sum[:]
 
         #emission distribution e
+        occurence_s=np.zeros(K)
+        g_N_sum=np.zeros(K)
+        
+        for s in range(0,S):
+            g_N_sum+=np.sum(g_i[s],axis=0)    
         for d in range(0,D):
-            e[:,d]=np.sum(g*np.expand_dims(z[:,d], axis=1),axis=0)/np.sum(g,axis=0)
+            occurence_s=0
+            for s in range(0,S):
+                occurence_s+=np.sum(g_i[s]*np.expand_dims(z[s][:,d], axis=1),axis=0)
+                print(occurence_s)
+                print(g_N_sum)
+            e[:,d]=occurence_s/g_N_sum
+
+        #---E-step multiple sequences-----        
+        for s in range(0,S):
+            [g,ceta,LL_s]=get_gamma_ceta(pi,a,e,z[s])
+            g_i[s][:,:]=g
+            ceta_i[s][:,:,:]=ceta
+            LL[iter]+=LL_s #likelihood of sequnces are factors -> log-likelihood is sum
+
+
+
 
         #----check consistency----
         # print('check g:' +str(1e-10>(N-1-np.sum(g))))
@@ -443,7 +496,7 @@ def baumwelch(pi,a,e,z,n_iter):
         # print('check g_sum: ' +str((1e-10>np.sum(np.abs(g_sum-np.sum(g[0:-1,:],axis=0))))))
 
 
-    [f_s,c,L]=forward_scaled(pi,a,e,z)
-    LL[n_iter]=np.log(L)
+
+
     print('Baumwelch time: '+str(time.time()-start_time))
     return pi,a,e,LL
