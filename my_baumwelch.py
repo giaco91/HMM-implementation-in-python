@@ -9,7 +9,7 @@ from BW_utility import *
 # #pi, initial distribution of hidden states
 # #a, transition matrice of the MC
 # #e, emission probability distributions for each state
-# #x, hidden the states
+# #x, hidden states
 # #z, observations (data)
 # #f[n,k]=p(z_1,...,z_n,x_n=k)
 # #b[n,k]=p(z_n+1,...,z_N|x_n=k)
@@ -26,6 +26,8 @@ from BW_utility import *
 [pi,a,e,LL]=baumwelch(pi,a,e,z,10)
 sample=sample_observation(pi,a,e,z[0],10)
 print(sample)
+print(LL)
+#print(sample)
 # x=sample_hiddenpath(pi,a,10)
 # sample_from_path=sample_from_hiddenpath(x,e)
 
