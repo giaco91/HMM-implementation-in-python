@@ -115,13 +115,21 @@ def init(K,D):
     sequences=[]
     #cyclic sequence that can be learned perfectly for K>=3
     z1=np.array([[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0]]) #shape: (N,D) (1-hot encoding)
-    z2=np.array([[1,0,0],[0,1,0],[0,1,0],[1,0,0],[0,1,0],[0,0,1],[1,0,0],[1,0,0]])
+    z2=np.array([[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0]])
     z3=np.array([[0,1,0],[0,0,1],[1,0,0],[0,1,0]])
     sequences.append(z1)
     sequences.append(z2)
     sequences.append(z3)
 
     return pi,a,e,sequences
+
+def one_hot_encoding(z,D):
+    N=z.shape[0]
+    z=z.astype(int)
+    z_encoded=np.zeros((N,D)).astype(int)
+    for i in range(0,N):
+        z_encoded[i,z[i]]=1
+    return z_encoded
 
 def check_transmat(a):
     #this funktion checks a to be a allowed transition matrix
@@ -485,7 +493,7 @@ def baumwelch(pi,a,e,z,n_iter):
             [g,ceta,LL_s]=get_gamma_ceta(pi,a,e,z[s])
             g_i[s][:,:]=g
             ceta_i[s][:,:,:]=ceta
-            LL[iter]+=LL_s #likelihood of sequnces are factors -> log-likelihood is sum
+            LL[iter+1]+=LL_s #likelihood of sequnces are factors -> log-likelihood is sum
 
 
 

@@ -22,21 +22,20 @@ import time
 
 #super class
 class Hmm():
-    def __init__(self, emission_type,num_hiddenstates,init_prob,transition_matrix):
+    def __init__(self, emission_type,num_hiddenstates,init_prob,transition_matrix,print_every):
         self.emission_type=emission_type
         self.K=num_hiddenstates
         self.pi=init_prob
         self.a=transition_matrix
+        self.print_every=print_every
     
     def sample_hiddenpath(self,L):
-        pi=self.pi
-        a=self.a
         x=np.zeros(L).astype(int)
-        
+
         #ML sampling
-        x[0]=np.argmax(pi)
+        x[0]=np.argmax(self.pi)
         for l in range(1,L):
-            x[l]=np.argmax(a[x[l-1],:])
+            x[l]=np.argmax(self.a[x[l-1],:])
         return x
 
     def sample_from_hiddenpath(self,x):
@@ -80,15 +79,12 @@ class Hmm():
         #f_s_n, the forward message at sequence point n
         #z_n,the n-th observation
         #K=f_s_n.shape[0]
-        K=self.K
-        a=self.a
-        e=self.e
-        c_n_times_f_s=np.zeros(K)
-        for l in range(0,K):
+        c_n_times_f_s=np.zeros(self.K)
+        for l in range(0,self.K):
             L_prev=0
-            for k in range(0,K):
-                L_prev+=f_s_n[k]*a[k,l]
-            c_n_times_f_s[l]=e[l,np.argmax(z_n)]*L_prev
+            for k in range(0,self.K):
+                L_prev+=f_s_n[k]*self.a[k,l]
+            c_n_times_f_s[l]=self.e[l,np.argmax(z_n)]*L_prev
         c=np.sum(c_n_times_f_s)
         f_s_np1=c_n_times_f_s/c
         return f_s_np1,c  
@@ -99,33 +95,27 @@ class Hmm():
         #e, emission probability distributions for each state
         #z, observations (data)
         #This function returns the forward messages and the Likelihood
-        
-        K=self.K #number of hidden states
-        pi=self.pi
-        e=self.e
-        a=self.a
-        D=self.D #number of output states (for discrete ouput space)
-        z_shape=z.shape
-        N=z_shape[0] #size of sequence
-        f_s=np.zeros((N,K)) #allocate memory for scaled forward messages
+
+        N=z.shape[0] #size of sequence
+        f_s=np.zeros((N,self.K)) #allocate memory for scaled forward messages
         #note that f_s[:,n] is a probability vector, namely, p(z_n|z_1,...,z_n-1)
         c=np.zeros(N) #scaling factors
         z_hot=self.one_hot_decoding(z)
 
         #initialize first message
-        for k in range(0,K):
-            f_s[0,k]=e[k,z_hot[0]]*pi[k]
+        for k in range(0,self.K):
+            f_s[0,k]=self.e[k,z_hot[0]]*self.pi[k]
             c[0]+=f_s[0,k]
         f_s[0,:]=f_s[0,:]/c[0]
 
         #forward propagation
-        c_n_times_f_s=np.zeros(K)
+        c_n_times_f_s=np.zeros(self.K)
         for n in range(1,N):
-            for l in range(0,K):
+            for l in range(0,self.K):
                 L_prev=0
-                for k in range(0,K):
-                    L_prev+=f_s[n-1,k]*a[k,l]
-                c_n_times_f_s[l]=e[l,z_hot[n]]*L_prev
+                for k in range(0,self.K):
+                    L_prev+=f_s[n-1,k]*self.a[k,l]
+                c_n_times_f_s[l]=self.e[l,z_hot[n]]*L_prev
             c[n]=np.sum(c_n_times_f_s) #c_n is the normalizing coefficient
             f_s[n,:]=c_n_times_f_s/c[n]
 
@@ -138,14 +128,9 @@ class Hmm():
         #z, observations (data)
         #This function returns the scaled backward messages
         # c, the scaling factors computed in the forward phase
-
-        K=self.K #number of hidden states
-        D=self.D
-        a=self.a
-        e=self.e
         z_shape=z.shape
-        N=z_shape[0] #size of sequence
-        b_s=np.zeros((N,K)) #allocate memory for scaled backward messages
+        N=z.shape[0] #size of sequence
+        b_s=np.zeros((N,self.K)) #allocate memory for scaled backward messages
         
         z_hot=self.one_hot_decoding(z)
 
@@ -154,17 +139,120 @@ class Hmm():
 
         #backward propagation
         for n in range(1,N):
-            for l in range(0,K):
-                for k in range(0,K):
-                    b_s[N-n-1,l]+=e[k,z_hot[N-n]]*b_s[N-n,k]*a[l,k]
+            for l in range(0,self.K):
+                for k in range(0,self.K):
+                    b_s[N-n-1,l]+=self.e[k,z_hot[N-n]]*b_s[N-n,k]*self.a[l,k]
             b_s[N-n-1,:]/=c[N-n]
 
         return b_s
 
+    def get_gamma_ceta(self,z):
+        #z must be a sequence (unwrapped from the list)
+        N=z.shape[0] #sequence length
+
+        z_hot=self.one_hot_decoding(z)
+        [f_s,c,L]=self.forward_scaled(z)
+        LL=np.log(L)
+        b_s=self.backward_scaled(z,c)
+
+        g=f_s*b_s
+        ceta=np.zeros((N,self.K,self.K))
+        for n in range(0,N-1):
+            for k in range(0,self.K):
+                for l in range(0,self.K):
+                    ceta[n,l,k]=f_s[n,l]*self.a[l,k]*b_s[n+1,k]*self.e[k,z_hot[n+1]]/c[n+1]
+
+        return g,ceta,LL
+
+    def baumwelch(self,z,n_iter):
+        #pi, initial distribution of hidden states
+        #a, transition matrice of the MC
+        #e, emission probability distributions for each state
+        #z, observations (data)
+        #This function returns the ML parameters for the EM procedure
+
+        #notation:
+        #g[n,l]=f[n,l]*b[n,l]/p(z^n)=p(x_n=l|z^n), responsibility
+        #note: g[n,:] is a probabilidty vecator
+        #ceta[n,l,k]=p(x_n=l,x_n+1 = k|z^n)
+        #note: g[n,l]=np.sum(ceta,axis=2)
+
+        start_time = time.time()
+        print_time=self.print_every
+        S=len(z) #amount of sequences
+        LL=np.zeros(n_iter+1)#store the log-likelihood
+        g_i=[]#store the responsibilities for all sequences
+        ceta_i=[]#store the cetas for all sequences
+
+        #-----first E-step------
+        for s in range(0,S):
+            [g,ceta,LL_s]=self.get_gamma_ceta(z[s])
+            g_i.append(g)
+            ceta_i.append(ceta)
+            LL[0]+=LL_s #likelihood of sequnces are factors -> log-likelihood is sum
+        #improvement=np.zeros((n_iter))#store (ln((L_i)-ln(L_i-1))/ln(L_i-1)
+
+        for iter in range(0,n_iter):
+
+            #----M-step for multiple sequences----
+            
+            #initial hidden state distr.
+            g_1_sum=np.zeros(self.K)
+            g_partition=0
+            for s in range(0,S):
+                g_1_sum+=g_i[s][0,:]
+                g_partition+=np.sum(g_i[s][0,:])
+            self.pi=g_1_sum/g_partition
+
+            #state tranistion matrix a
+            ceta_s_sum=np.zeros((self.K,self.K))
+            g_s_sum=np.zeros(self.K)
+            for s in range(0,S):
+                ceta_sum=np.sum(ceta_i[s],axis=0)
+                ceta_s_sum+=ceta_sum
+                g_s_sum+=np.sum(ceta_sum,axis=1)
+            for k in range(0,self.K):
+                self.a[:,k]=ceta_s_sum[:,k]/g_s_sum[:]
+
+            #emission distribution e
+            occurence_s=np.zeros(self.K)
+            g_N_sum=np.zeros(self.K)
+            
+            for s in range(0,S):
+                g_N_sum+=np.sum(g_i[s],axis=0)    
+            for d in range(0,self.D):
+                occurence_s=0
+                for s in range(0,S):
+                    occurence_s+=np.sum(g_i[s]*np.expand_dims(z[s][:,d], axis=1),axis=0)
+                self.e[:,d]=occurence_s/g_N_sum
+
+            #---E-step-----        
+            for s in range(0,S):
+                [g,ceta,LL_s]=self.get_gamma_ceta(z[s])
+                g_i[s]=g
+                ceta_i[s]=ceta
+                LL[iter+1]+=LL_s #likelihood of sequnces are factors -> log-likelihood is sum
+
+            current_time=time.time()-start_time
+            if current_time>print_time:
+                print('Epoch: '+str(iter)+', Training time: '+str(int(current_time))+'s, Likelihood: '+str(LL_s))
+                print_time=current_time+self.print_every
+            #----check consistency----
+            # print('check g:' +str(1e-10>(N-1-np.sum(g))))
+            # print('check ceta:' +str(1e-10>(N-1-np.sum(ceta))))        
+            # print('check g_sum: ' +str((1e-10>np.sum(np.abs(g_sum-np.sum(g[0:-1,:],axis=0))))))
+
+
+        print('Total training time: '+str(time.time()-start_time))
+        return LL
+
 #The actual hmm-graphs are child classes.
 class Discrete_emission(Hmm):
 
-    def __init__(self,K,D,init_distr=None,trans_mat=None,emission_mat=0):
+    def __init__(self,K,D,init_distr=None,trans_mat=None,emission_mat=None,print_every=5):
+        #---preprocess input-----
+        if print_every<1:
+            raise ValueError('print_every must be a positive number larger than one (seconds)!')
         if init_distr is None:
             init_distr=self.get_rp_vector(K)
         else:
@@ -190,7 +278,9 @@ class Discrete_emission(Hmm):
                 raise ValueError('The shape of the transition matrix must be (K,D)!')
             if not self.check_emission_mat(emission_mat):
                 raise ValueError('The given emission matrix is not a proper probability table!')
-        Hmm.__init__(self,'discrete_emission',K,init_distr,trans_mat)
+        #------------------
+        Hmm.__init__(self,'discrete_emission',K,init_distr,trans_mat,print_every)#init from super class HMM
+        #the emissions and its properties are subclass specific
         self.e=emission_mat
         self.D=D
 
@@ -209,6 +299,13 @@ class Discrete_emission(Hmm):
             z_decoded[i]=k
         return z_decoded.astype(int)
 
+    def one_hot_encoding(self,z):
+        N=z.shape[0]
+        z_encoded=np.zeros((N,D)).astype(int)
+        for i in range(0,N):
+            z_encoded[i,z[i]]=1
+        return z_encoded
+
 
     def check_emission_mat(self,e):
         #this funktion checks a to be a allowed emission
@@ -218,6 +315,10 @@ class Discrete_emission(Hmm):
                 return False
         return True
 
+    def fit(self,z,n_iter):
+        return self.baumwelch(z,n_iter)
+
+
 
     def sample_observation(self,z,L):
         #pi,a,e, the model parameters
@@ -225,28 +326,22 @@ class Discrete_emission(Hmm):
         #L, the number of predicted points
         #returns an oversvation sample
 
-        K=self.K #number of hidden states
-        D=self.D #number of output states (for discrete ouput space)
-        pi=self.pi
-        a=self.a
-        e=self.e
-        z_shape=z.shape
-        N=z_shape[0] #size of sequence
-        z_sampled=np.zeros((N+L,D))
+        N=z.shape[0] #size of sequence
+        z_sampled=np.zeros((N+L,self.D))
         z_sampled[0:N,:]=z
-        pred_distr=np.zeros(D) #pred_distr[k]=p(z_N+1=k|z)
-        pred_hidden=np.zeros(K) #pred_hidden[k]=p(z_N+1=k|x^N) 
+        pred_distr=np.zeros(self.D) #pred_distr[k]=p(z_N+1=k|z)
+        pred_hidden=np.zeros(self.K) #pred_hidden[k]=p(z_N+1=k|x^N) 
         
         [f_s,c,Likelihood]=self.forward_scaled(z_sampled[0:N,:])
         f_s=f_s[N-1,:]
         for s in range(0,L):
             pred_distr*=0
             pred_hidden*=0
-            for k in range(0,K):
-                for l in range(0,K):
-                    pred_hidden[k]+=a[l,k]*f_s[l]
-                for d in range(0,D):
-                    pred_distr[d]+=e[k,d]*pred_hidden[k]
+            for k in range(0,self.K):
+                for l in range(0,self.K):
+                    pred_hidden[k]+=self.a[l,k]*f_s[l]
+                for d in range(0,self.D):
+                    pred_distr[d]+=self.e[k,d]*pred_hidden[k]
             z_sampled[N+s,np.argmax(pred_distr)]=1 #ML-sampling
             [f_s,c]=self.scaled_forward_recursion_step(f_s,z_sampled[N+s,:])
         return z_sampled
@@ -259,14 +354,7 @@ class Discrete_emission(Hmm):
         #This function returns the ML hidden path.
         #Furthermore it returns the ML joint p(x^n,z^n). 
 
-        K=self.K #number of hidden states
-        D=self.D
-        pi=self.pi
-        a=self.a
-        e=self.e
-        z_shape=z.shape
-        N=z_shape[0] #size of sequence
-
+        N=z.shape[0] #size of sequence
         z=self.one_hot_decoding(z)
 
         #Denote: 
@@ -274,25 +362,26 @@ class Discrete_emission(Hmm):
         #T[n,l]=argmax_k{d[n-1,k]*a[k,l]}, the tracker
         #x_ml = argmax_x^n{p(x^n,z^n)}
 
-        d=np.zeros((N,K))
-        T=np.zeros((N,K)).astype(int)#note: T[0,:] stays unused, but I still allocate it for convenience
+        d=np.zeros((N,self.K))
+        T=np.zeros((N,self.K)).astype(int)#note: T[0,:] stays unused, but I still allocate it for convenience
         x_ml=np.zeros((N)).astype(int)
 
+        #----forward to find ML------
         #init
-        for k in range(0,K):
-            d[0,k]=pi[k]*e[k,z[0]]
+        for k in range(0,self.K):
+            d[0,k]=self.pi[k]*self.e[k,z[0]]
 
         #recursion
         for n in range(1,N):
-            for l in range(0,K):
-                d[n,l]=np.amax(d[n-1,:]*a[:,l])*e[l,z[n]]
-                T[n,l]=np.argmax(d[n-1,:]*a[:,l])
+            for l in range(0,self.K):
+                d[n,l]=np.amax(d[n-1,:]*self.a[:,l])*self.e[l,z[n]]
+                T[n,l]=np.argmax(d[n-1,:]*self.a[:,l])
         #ML
-        ML=np.amax(d[N-1,:]*e[:,z[N-1]])
+        ML=np.amax(d[N-1,:]*self.e[:,z[N-1]])
 
-        #Backtracking to find maximizing path
+        #-------Backtracking to find maximizing path----
         #init:
-        x_ml[N-1]=np.argmax(d[N-1,:]*e[:,z[N-1]])
+        x_ml[N-1]=np.argmax(d[N-1,:]*self.e[:,z[N-1]])
         #recursion:
         for i in range(1,N):
             n=N-i-1
@@ -522,3 +611,5 @@ class Discrete_emission(Hmm):
 
     #     print('Baumwelch time: '+str(time.time()-start_time))
     #     return pi,a,e,LL
+
+
