@@ -3,6 +3,10 @@ import time
 from BW_utility import *
 from Hmm import *
 
+
+from mpl_toolkits import mplot3d
+import matplotlib.pyplot as plt
+
 # #-----------notation-----------
 # #K, number of hidden states
 # #N, sequence size
@@ -17,30 +21,30 @@ from Hmm import *
 
 # #------------------------------
 
-[pi,a,e,z]=init(2,3)
-hmm_disc=Discrete_emission(K=2,D=3,emission_mat=e,init_distr=pi,trans_mat=a)
+[pi,a,e,z]=init(3,3)
+covar1=np.array([[1,0],[0,1]])
+covar2=np.array([[1,0],[0,2]])
+mean1=np.array([0,0])
+mean2=np.array([2,0])
+covars=[covar1,covar2]
+means=[mean1, mean2]
+
+hmm_gauss=Gaussian_emission(K=2,D=2,means=means, covars=covars)
+
+
+hmm_disc=Discrete_emission(K=3,D=3,emission_mat=e,init_distr=pi,trans_mat=a)
 x=hmm_disc.sample_hiddenpath(10)
 [f_s,c,L]=hmm_disc.forward_scaled(z[0])
 b_s=hmm_disc.backward_scaled(z[0],c)
 sample=hmm_disc.sample_observation(z[0],12)
 [x_ml,ML]=hmm_disc.viterbi(z[0])
 print(x_ml)
+LL=hmm_disc.fit(z,10)
+print(LL)
+sample=hmm_disc.sample_observation(z[0],7)
+print(sample)
 
 
-# print(check_transmat(a))
-# print(check_pi(pi))
-# print(check_emission(e))
-#print(check_forward_backward_consistency(pi,a,e,z[0]))
-
-# [pi,a,e,LL]=baumwelch(pi,a,e,z,10)
-# sample=sample_observation(pi,a,e,z[0],10)
-# print(sample)
-# print(LL)
-#print(sample)
-# x=sample_hiddenpath(pi,a,10)
-# sample_from_path=sample_from_hiddenpath(x,e)
-
-#[x_ml,ML]=viterbi(pi,a,e,z[0])
 
 
 

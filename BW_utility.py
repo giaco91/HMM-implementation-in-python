@@ -107,10 +107,12 @@ def init(K,D):
     
     pi=get_rp_vector(K)
     a=np.zeros((K,K))
-    e=np.zeros((K,D))
+    #e=np.zeros((K,D))
+    e=[]
     for k in range(0,K):
         a[k,:]=get_rp_vector(K)
-        e[k,:]=get_rp_vector(D)
+        #e[k,:]=get_rp_vector(D)
+        e.append(get_rp_vector(D))
 
     sequences=[]
     #cyclic sequence that can be learned perfectly for K>=3

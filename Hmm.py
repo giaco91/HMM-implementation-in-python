@@ -5,6 +5,7 @@
 #------------------------------------------------------------------------
 
 import numpy as np
+from distributions import *
 import time
 
 
@@ -20,6 +21,7 @@ import time
 #f[n,k]=p(z_1,...,z_n,x_n=k)
 #b[n,k]=p(z_n+1,...,z_N|x_n=k)
 
+
 #super class
 class Hmm():
     def __init__(self, emission_type,num_hiddenstates,init_prob,transition_matrix,print_every):
@@ -27,7 +29,7 @@ class Hmm():
         self.K=num_hiddenstates
         self.pi=init_prob
         self.a=transition_matrix
-        self.print_every=print_every
+        self.print_every=print_every #prints information about the training states ever print_every seconds
     
     def sample_hiddenpath(self,L):
         x=np.zeros(L).astype(int)
@@ -38,13 +40,17 @@ class Hmm():
             x[l]=np.argmax(self.a[x[l-1],:])
         return x
 
+    def check_symmetric_and_posdef(self,A):
+        return np.allclose(A, A.T) and np.all(np.linalg.eigvals(A) > 0)
+
     def sample_from_hiddenpath(self,x):
         #x,a hidden path
         L=x.shape[0]
         z=np.zeros((L,self.D))
         #ML sampling
         for l in range(0,L):
-            z[l,np.argmax(self.e[x[l],:])]=1
+            #z[l,np.argmax(self.e[x[l],:])]=1
+            z[l,np.argmax(self.e[x[l]])]=1
         return z
 
     def get_rp_vector(self,N):
@@ -55,6 +61,28 @@ class Hmm():
         P+=epsilon
         P/=np.sum(P)
         return P
+
+    
+    def check_input(self,K,init_distr,trans_mat,print_every):
+        if print_every<1:
+            raise ValueError('print_every must be a positive number larger than one (seconds)!')
+        if init_distr is None:
+            init_distr=self.get_rp_vector(K)
+        else:
+            if init_distr.shape[0]!=K:
+                raise ValueError('The shape of the initial probability vector must (K,)!')
+            if not self.check_probability_vec(init_distr):
+                raise ValueError('The given initial distribution is not a proper probability vector!')
+        if trans_mat is None:
+            trans_mat=np.zeros((K,K))
+            for k in range(0,K):
+                trans_mat[k,:]=self.get_rp_vector(K)
+        else: 
+            if trans_mat.shape[0]!=K or trans_mat.shape[1]!=K:
+                raise ValueError('The shape of the transition matrix must be (K,K)!')
+            if not self.check_trans_mat(trans_mat):
+                raise ValueError('The given transition matrix is not a proper probability table!')
+
 
     def check_trans_mat(self,a):
         #this funktion checks a to be a allowed transition matrix
@@ -84,7 +112,8 @@ class Hmm():
             L_prev=0
             for k in range(0,self.K):
                 L_prev+=f_s_n[k]*self.a[k,l]
-            c_n_times_f_s[l]=self.e[l,np.argmax(z_n)]*L_prev
+            #c_n_times_f_s[l]=self.e[l,np.argmax(z_n)]*L_prev
+            c_n_times_f_s[l]=self.e[l][np.argmax(z_n)]*L_prev
         c=np.sum(c_n_times_f_s)
         f_s_np1=c_n_times_f_s/c
         return f_s_np1,c  
@@ -104,7 +133,8 @@ class Hmm():
 
         #initialize first message
         for k in range(0,self.K):
-            f_s[0,k]=self.e[k,z_hot[0]]*self.pi[k]
+            #f_s[0,k]=self.e[k,z_hot[0]]*self.pi[k]
+            f_s[0,k]=self.e[k][z_hot[0]]*self.pi[k]
             c[0]+=f_s[0,k]
         f_s[0,:]=f_s[0,:]/c[0]
 
@@ -115,7 +145,8 @@ class Hmm():
                 L_prev=0
                 for k in range(0,self.K):
                     L_prev+=f_s[n-1,k]*self.a[k,l]
-                c_n_times_f_s[l]=self.e[l,z_hot[n]]*L_prev
+                #c_n_times_f_s[l]=self.e[l,z_hot[n]]*L_prev
+                c_n_times_f_s[l]=self.e[l][z_hot[n]]*L_prev
             c[n]=np.sum(c_n_times_f_s) #c_n is the normalizing coefficient
             f_s[n,:]=c_n_times_f_s/c[n]
 
@@ -141,7 +172,8 @@ class Hmm():
         for n in range(1,N):
             for l in range(0,self.K):
                 for k in range(0,self.K):
-                    b_s[N-n-1,l]+=self.e[k,z_hot[N-n]]*b_s[N-n,k]*self.a[l,k]
+                    #b_s[N-n-1,l]+=self.e[k,z_hot[N-n]]*b_s[N-n,k]*self.a[l,k]
+                    b_s[N-n-1,l]+=self.e[k][z_hot[N-n]]*b_s[N-n,k]*self.a[l,k]
             b_s[N-n-1,:]/=c[N-n]
 
         return b_s
@@ -160,7 +192,8 @@ class Hmm():
         for n in range(0,N-1):
             for k in range(0,self.K):
                 for l in range(0,self.K):
-                    ceta[n,l,k]=f_s[n,l]*self.a[l,k]*b_s[n+1,k]*self.e[k,z_hot[n+1]]/c[n+1]
+                    #ceta[n,l,k]=f_s[n,l]*self.a[l,k]*b_s[n+1,k]*self.e[k,z_hot[n+1]]/c[n+1]
+                    ceta[n,l,k]=f_s[n,l]*self.a[l,k]*b_s[n+1,k]*self.e[k][z_hot[n+1]]/c[n+1]
 
         return g,ceta,LL
 
@@ -224,7 +257,10 @@ class Hmm():
                 occurence_s=0
                 for s in range(0,S):
                     occurence_s+=np.sum(g_i[s]*np.expand_dims(z[s][:,d], axis=1),axis=0)
-                self.e[:,d]=occurence_s/g_N_sum
+                #self.e[:,d]=occurence_s/g_N_sum
+                helper=occurence_s/g_N_sum
+                for i in range(0,self.K):
+                    self.e[i][d]=helper[i]
 
             #---E-step-----        
             for s in range(0,S):
@@ -251,30 +287,16 @@ class Discrete_emission(Hmm):
 
     def __init__(self,K,D,init_distr=None,trans_mat=None,emission_mat=None,print_every=5):
         #---preprocess input-----
-        if print_every<1:
-            raise ValueError('print_every must be a positive number larger than one (seconds)!')
-        if init_distr is None:
-            init_distr=self.get_rp_vector(K)
-        else:
-            if init_distr.shape[0]!=K:
-                raise ValueError('The shape of the initial probability vector must (K,)!')
-            if not self.check_probability_vec(init_distr):
-                raise ValueError('The given initial distribution is not a proper probability vector!')
-        if trans_mat is None:
-            trans_mat=np.zeros((K,K))
-            for k in range(0,K):
-                trans_mat[k,:]=self.get_rp_vector(K)
-        else: 
-            if trans_mat.shape[0]!=K or trans_mat.shape[1]!=K:
-                raise ValueError('The shape of the transition matrix must be (K,K)!')
-            if not self.check_trans_mat(trans_mat):
-                raise ValueError('The given transition matrix is not a proper probability table!')
+        self.check_input(K,init_distr,trans_mat,print_every)
         if emission_mat is None:
-            emission_mat=np.zeros((K,D))
+            #emission_mat=np.zeros((K,D))
+            emission_mat=[]
             for k in range(0,K):
-                emission_mat[k,:]=self.get_rp_vector(D) 
+                #emission_mat[k,:]=self.get_rp_vector(D)
+                emission_mat.append(self.get_rp_vector(D)) 
         else:
-            if emission_mat.shape[0]!=K or emission_mat.shape[1]!=D:
+            #if emission_mat.shape[0]!=K or emission_mat.shape[1]!=D:
+            if len(emission_mat)!=K or emission_mat[0].shape[0]!=D:
                 raise ValueError('The shape of the transition matrix must be (K,D)!')
             if not self.check_emission_mat(emission_mat):
                 raise ValueError('The given emission matrix is not a proper probability table!')
@@ -310,8 +332,9 @@ class Discrete_emission(Hmm):
     def check_emission_mat(self,e):
         #this funktion checks a to be a allowed emission
         #i.e. that it is a valid probability dirstibution for each k
-        for k in range(0,e.shape[0]):
-            if not self.check_probability_vec(e[k,:]):
+        # for k in range(0,e.shape[0]):
+        for k in range(0,len(e)):
+            if not self.check_probability_vec(e[k]):
                 return False
         return True
 
@@ -341,7 +364,8 @@ class Discrete_emission(Hmm):
                 for l in range(0,self.K):
                     pred_hidden[k]+=self.a[l,k]*f_s[l]
                 for d in range(0,self.D):
-                    pred_distr[d]+=self.e[k,d]*pred_hidden[k]
+                    #pred_distr[d]+=self.e[k,d]*pred_hidden[k]
+                    pred_distr[d]+=self.e[k][d]*pred_hidden[k]
             z_sampled[N+s,np.argmax(pred_distr)]=1 #ML-sampling
             [f_s,c]=self.scaled_forward_recursion_step(f_s,z_sampled[N+s,:])
         return z_sampled
@@ -369,19 +393,29 @@ class Discrete_emission(Hmm):
         #----forward to find ML------
         #init
         for k in range(0,self.K):
-            d[0,k]=self.pi[k]*self.e[k,z[0]]
+            #d[0,k]=self.pi[k]*self.e[k,z[0]]
+            d[0,k]=self.pi[k]*self.e[k][z[0]]
 
         #recursion
         for n in range(1,N):
             for l in range(0,self.K):
-                d[n,l]=np.amax(d[n-1,:]*self.a[:,l])*self.e[l,z[n]]
+                #d[n,l]=np.amax(d[n-1,:]*self.a[:,l])*self.e[l,z[n]]
+                d[n,l]=np.amax(d[n-1,:]*self.a[:,l])*self.e[l][z[n]]
                 T[n,l]=np.argmax(d[n-1,:]*self.a[:,l])
         #ML
-        ML=np.amax(d[N-1,:]*self.e[:,z[N-1]])
+        #ML=np.amax(d[N-1,:]*self.e[:,z[N-1]])
+        ML=d[N-1,0]*self.e[0][z[N-1]]
+        ML_amax=0
+        for i in range(0,self.K):
+            new_value=d[N-1,i]*self.e[i][z[N-1]]
+            if new_value>ML:
+                ML=new_value
+                ML_amax=i
 
         #-------Backtracking to find maximizing path----
         #init:
-        x_ml[N-1]=np.argmax(d[N-1,:]*self.e[:,z[N-1]])
+        #x_ml[N-1]=np.argmax(d[N-1,:]*self.e[:,z[N-1]])
+        x_ml[N-1]=ML_amax
         #recursion:
         for i in range(1,N):
             n=N-i-1
@@ -389,227 +423,45 @@ class Discrete_emission(Hmm):
 
         return x_ml,ML
 
-    # def forward(pi,a,e,z):
-    #     #pi, initial distribution of hidden states
-    #     #a, transition matrice of the MC
-    #     #e, emission probability distributions for each state
-    #     #z, observations (data)
-    #     #This function returns the forward messages and the Likelihood
-        
-    #     K=pi.shape[0] #number of hidden states
-    #     z_shape=z.shape
-    #     N=z_shape[0] #size of sequence
-    #     D=z_shape[1] #number of output states (for discrete ouput space)
-    #     f=np.zeros((N,K)) #allocate memory for forward messages
-        
-    #     z_hot=one_hot_decoding(z)
-
-    #     #initialize first message
-    #     for k in range(0,K):
-    #         f[0,k]=e[k,z_hot[0]]*pi[k]
-
-    #     #forwarad propagation
-    #     for n in range(1,N):
-    #         for l in range(0,K):
-    #             L_prev=0
-    #             for k in range(0,K):
-    #                 L_prev+=f[n-1,k]*a[k,l]
-    #             f[n,l]=e[l,z_hot[n]]*L_prev
-        
-    #     L=np.sum(f[N-1,:])
-    #     return f,L
 
 
-    # def backward(a,e,z):
-    #     #a, transition matrice of the MC
-    #     #e, emission probability distributions for each state
-    #     #z, observations (data)
-    #     #This function returns the backward messages
 
-    #     K=a.shape[0] #number of hidden states
-    #     z_shape=z.shape
-    #     N=z_shape[0] #size of sequence
-    #     D=z_shape[1] #number of output states (for discrete ouput space)
-    #     b=np.zeros((N,K)) #allocate memory for backward messages
-        
-    #     z_hot=one_hot_decoding(z)
+class Gaussian_emission(Hmm):
 
-    #     #initialize first message
-    #     b[N-1,:]=1
-
-    #     #backward propagation
-    #     for n in range(1,N):
-    #         for l in range(0,K):
-    #             for k in range(0,K):
-    #                 b[N-n-1,l]+=e[k,z_hot[N-n]]*b[N-n,k]*a[l,k]
-    #     return b
-     
-
-    # def unscale_messages(f_s,b_s,c):
-    #     #f_s, scaled forward messages
-    #     #b_s, scaled backward messages
-    #     #c, scaling factors
-
-    #     f_s_shape=f_s.shape
-    #     N=f_s_shape[0]
-    #     K=f_s_shape[1]
-
-    #     f_unscaled=np.zeros((N,K))
-    #     L_n=1
-    #     for i in range(0,N):
-    #         L_n*=c[i]
-    #         f_unscaled[i,:]=f_s[i,:]*L_n
-
-    #     b_unscaled=np.zeros((N,K))
-    #     b_unscaled[N-1,:]=1 #broadcasting
-    #     L_n=1
-    #     for i in range(1,N):
-    #         n=N-i-1
-    #         L_n*=c[n+1]
-    #         b_unscaled[n,:]=b_s[n,:]*L_n
-
-    #     return f_unscaled, b_unscaled
+    def __init__(self,K,D,init_distr=None,trans_mat=None,means=None,covars=None,print_every=5):
+        #means and covars must be a list of np-arrays
+        #---preprocess input-----
+        self.check_input(K,init_distr,trans_mat,print_every)
+        if means is None:
+            means=[]
+            for i in range(0,K):
+                means.append(self.get_rp_vector(D)) #should at least be init with k-mean on some data 
+        else:
+            if len(means)!=K or means[0].shape[0]!= D:
+                raise ValueError('The shape of the means must be a list of length K with arrays of shape D!')
+        if covars is None:
+            covars=[]
+            for i in range(0,K):
+                covar=np.random.rand(D,D)
+                covars.append(np.dot(covar,covar.transpose())) #better to initialize with scaling order of some data, e.g. GMM
+        else:
+            if len(covars)!=K or covars[0].shape[0]!=D or covars[0].shape[1]!=D:
+               raise ValueError('The shape of the covars must be a list of length K containing arrays of shape (D,D)!')
+            for i in range(0,K):
+                if not self.check_symmetric_and_posdef(covars[i]):
+                    raise ValueError('At least one of the covariance matrices is not symmetric and positive definite!')
 
 
-    # def check_forward_backward_consistency(pi,a,e,z):
-
-    #     K=a.shape[0] #number of hidden states
-    #     z_shape=z.shape
-    #     N=z_shape[0] #size of sequence
-    #     D=z_shape[1] #number of output states (for discrete ouput space)
-
-    #     [f_s,c,L_s]=forward_scaled(pi,a,e,z)
-    #     b_s=backward_scaled(a,e,z,c)
-    #     [f,L]=forward(pi,a,e,z)
-    #     b=backward(a,e,z)
-        
-    #     [f_unscaled, b_unscaled]=unscale_messages(f_s,b_s,c)
-
-    #     eps=1e-10
-    #     check_L=abs((L-np.prod(c)))<eps
-    #     check_f_s=np.sum(np.abs(f-f_unscaled))<eps
-    #     check_b_s=np.sum(np.abs(b-b_unscaled))<eps
-
-    #     # print('is b_s*f_s the problem?: '+str(not(eps>np.sum(np.abs(L-np.sum(f_s[3,:]*b_s[3,:]))))))
-        
-    #     # print('check L and c')
-    #     # print(check_L)    
-        
-    #     # print('check f_s: ')
-    #     # print(check_f_s)
-        
-    #     # print('check b_s: ')
-    #     # print(check_b_s)
-
-    #     return (check_L & check_f_s & check_b_s)
-
-
-    # def get_gamma_ceta(pi,a,e,z):
-    #     #z must be a sequence (unwrapped from the list)
-    #     K=a.shape[0] #number of hidden states
-    #     z_shape=z.shape
-    #     N=z_shape[0] #sequence length
-    #     D=z_shape[1] #number of output states (for discrete ouput space)
-
-    #     z_hot=one_hot_decoding(z)
-    #     [f_s,c,L]=forward_scaled(pi,a,e,z)
-    #     LL=np.log(L)
-    #     b_s=backward_scaled(a,e,z,c)
-
-    #     g=f_s*b_s
-    #     ceta=np.zeros((N,K,K))
-    #     for n in range(0,N-1):
-    #         for k in range(0,K):
-    #             for l in range(0,K):
-    #                 ceta[n,l,k]=f_s[n,l]*a[l,k]*b_s[n+1,k]*e[k,z_hot[n+1]]/c[n+1]
-
-    #     return g,ceta,LL
-
-    # def baumwelch(pi,a,e,z,n_iter):
-    #     #pi, initial distribution of hidden states
-    #     #a, transition matrice of the MC
-    #     #e, emission probability distributions for each state
-    #     #z, observations (data)
-    #     #This function returns the ML parameters for the EM procedure
-
-    #     #notation:
-    #     #g[n,l]=f[n,l]*b[n,l]/p(z^n)=p(x_n=l|z^n), responsibility
-    #     #note: g[n,:] is a probabilidty vecator
-    #     #ceta[n,l,k]=p(x_n=l,x_n+1 = k|z^n)
-    #     #note: g[n,l]=np.sum(ceta,axis=2)
-
-    #     start_time = time.time()
-
-    #     K=a.shape[0] #number of hidden states
-    #     D=z[0].shape[1] #number of output states (for discrete ouput space)
-    #     S=len(z) #amount of sequences
-    #     LL=np.zeros(n_iter+1)#store the log-likelihood
-    #     g_i=[]#store the responsibilities for all sequences
-    #     ceta_i=[]#store the cetas for all sequences
-
-    #     #-----first E-step------
-    #     for s in range(0,S):
-    #         [g,ceta,LL_s]=get_gamma_ceta(pi,a,e,z[s])
-    #         g_i.append(g)
-    #         ceta_i.append(ceta)
-    #         LL[0]+=LL_s #likelihood of sequnces are factors -> log-likelihood is sum
-    #     #improvement=np.zeros((n_iter))#store (ln((L_i)-ln(L_i-1))/ln(L_i-1)
-
-    #     for iter in range(0,n_iter):
-
-    #         #----M-step for multiple sequences----
-            
-    #         #initial hidden state distr.
-    #         g_1_sum=np.zeros(K)
-    #         g_partition=0
-    #         for s in range(0,S):
-    #             g_1_sum+=g_i[s][0,:]
-    #             g_partition+=np.sum(g_i[s][0,:])
-    #         pi[:]=g_1_sum/g_partition
-
-    #         #state tranistion matrix a
-    #         ceta_s_sum=np.zeros((K,K))
-    #         g_s_sum=np.zeros(K)
-    #         for s in range(0,S):
-    #             ceta_sum=np.sum(ceta_i[s],axis=0)
-    #             ceta_s_sum+=ceta_sum
-    #             g_s_sum+=np.sum(ceta_sum,axis=1)
-    #         for k in range(0,K):
-    #             a[:,k]=ceta_s_sum[:,k]/g_s_sum[:]
-
-    #         #emission distribution e
-    #         occurence_s=np.zeros(K)
-    #         g_N_sum=np.zeros(K)
-            
-    #         for s in range(0,S):
-    #             g_N_sum+=np.sum(g_i[s],axis=0)    
-    #         for d in range(0,D):
-    #             occurence_s=0
-    #             for s in range(0,S):
-    #                 occurence_s+=np.sum(g_i[s]*np.expand_dims(z[s][:,d], axis=1),axis=0)
-    #                 print(occurence_s)
-    #                 print(g_N_sum)
-    #             e[:,d]=occurence_s/g_N_sum
-
-    #         #---E-step multiple sequences-----        
-    #         for s in range(0,S):
-    #             [g,ceta,LL_s]=get_gamma_ceta(pi,a,e,z[s])
-    #             g_i[s][:,:]=g
-    #             ceta_i[s][:,:,:]=ceta
-    #             LL[iter]+=LL_s #likelihood of sequnces are factors -> log-likelihood is sum
+        #------------------
+        Hmm.__init__(self,'gaussian_emission',K,init_distr,trans_mat,print_every)#init from super class HMM
+        #the emissions and its properties are subclass specific
+        e=[]
+        for i in range(0,K):
+            e.append(Gaussian_distribution(means[i],covars[i]))
+        self.e=e
+        self.D=D
 
 
 
 
-    #         #----check consistency----
-    #         # print('check g:' +str(1e-10>(N-1-np.sum(g))))
-    #         # print('check ceta:' +str(1e-10>(N-1-np.sum(ceta))))        
-    #         # print('check g_sum: ' +str((1e-10>np.sum(np.abs(g_sum-np.sum(g[0:-1,:],axis=0))))))
-
-
-
-
-    #     print('Baumwelch time: '+str(time.time()-start_time))
-    #     return pi,a,e,LL
-
-
+    
