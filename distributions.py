@@ -9,19 +9,42 @@ class Gaussian_distribution():
         self.D=mean.shape[0]
         self.update_parameters(mean,covar)
 
-    def check_symmetric_and_posdef(self,A):
-        return np.allclose(A, A.T) and np.all(np.linalg.eigvals(A) > 0)
+    def check_symmetric(self,A):
+        symmetric=np.allclose(A, A.T)
+        return symmetric
+    def check_pos_def(self,A):
+        posdef=np.all(np.linalg.eigvals(A) > 0)
+        return posdef
 
-    def update_parameters(self,mean,covar):
-        #---this check should be skipped for efficiency if used often and safely 
-        if not ((mean.shape[0] == covar.shape[0]) and (mean.shape[0] == covar.shape[0])):
+
+    def update_parameters(self,mean=None,covar=None):
+        #---this check should be skipped for efficiency if used often and safely
+        if mean is None:
+            pass
+        elif not mean.shape[0] == self.D:
             raise ValueError('The dimensions of the mean vector and the covariance matrix are not consistent.')
-        if not self.check_symmetric_and_posdef(covar):
-            raise ValueError('The covariance matrice is not symmetric and positive definite!')
-        self.mean=mean
-        self.covar=covar
-        self.invcovar=np.linalg.inv(covar)
-        self.density_proportionalfactor=np.power(2*np.pi,-self.D/2)*np.power(np.linalg.det(covar),-1/2)
+        else:
+            self.mean=mean
+        if covar is None:
+            pass
+        elif not ((covar.shape[0]==self.D and covar.shape[1]==self.D) and self.check_symmetric(covar)):
+            raise ValueError('The covariance matrice is not symmetric!')
+        elif not self.check_pos_def(covar):
+            print('Warning: matrix is not strictly positive definite')
+            print(covar)
+            #try to make it positive definite
+            ew=np.linalg.eigvals(covar)
+            eps=-np.min(ew)+1e-1
+            print('eps: '+str(eps))
+            diags=np.ones(self.D)*eps
+            covar+=np.diag(diags)
+            posdef=np.all(np.linalg.eigvals(covar) > 0)
+            if not posdef:
+                print('covar still not strictly positive definite')
+        else:
+            self.covar=covar
+            self.invcovar=np.linalg.inv(covar)
+            self.density_proportionalfactor=np.power(2*np.pi,-self.D/2)*np.power(np.linalg.det(self.covar),-1/2)
 
     def density(self,x):
         if x.shape[0]!=self.D:

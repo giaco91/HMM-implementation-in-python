@@ -99,6 +99,13 @@ def one_hot_decoding(z):
         z_decoded[i]=k
     return z_decoded.astype(int)
 
+def make_data_noisy(z,covar):
+    #add gaussian noise
+    mean=np.zeros(z.shape[1])
+    z=z+np.random.multivariate_normal(mean,covar,z.shape[0])
+    return z
+
+
 def init(K,D):
     #Parameter initialization
     #N,sequence size
@@ -116,12 +123,22 @@ def init(K,D):
 
     sequences=[]
     #cyclic sequence that can be learned perfectly for K>=3
-    z1=np.array([[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0]]) #shape: (N,D) (1-hot encoding)
-    z2=np.array([[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0]])
-    z3=np.array([[0,1,0],[0,0,1],[1,0,0],[0,1,0]])
-    sequences.append(z1)
-    sequences.append(z2)
-    sequences.append(z3)
+    # z1=np.array([[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0]]) #shape: (N,D) (1-hot encoding)
+    # z2=np.array([[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0]])
+    # z3=np.array([[0,1,0],[0,0,1],[1,0,0],[0,1,0]])
+    # z4=np.array([[1,0,1],[0,1,0],[0,0,1],[1,0,0],[0,1,0],[0,0,1],[1,0,0],[0,1,0]])
+
+    gz1=np.array([[1,0],[0,1],[1,0],[0,1],[1,0],[0,1],[1,0],[0,1]])
+    gz2=np.array([[1,0],[0,1],[1,0],[0,1],[1,0],[0,1],[1,0],[0,1],[1,0],[0,1],[1,0],[0,1]])
+    
+    covar=np.array([[0.1,0],[0,0.1]])
+    gz1=make_data_noisy(gz1,covar)
+    gz2=make_data_noisy(gz2,covar)
+
+
+    sequences.append(gz1)
+    sequences.append(gz2)
+    #sequences.append(z4)
 
     return pi,a,e,sequences
 
