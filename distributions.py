@@ -13,12 +13,13 @@ class Gaussian_distribution():
         symmetric=np.allclose(A, A.T)
         return symmetric
     def check_pos_def(self,A):
-        posdef=np.all(np.linalg.eigvals(A) > 0)
+        posdef=np.all(np.linalg.eigvals(A) > 1e-4)#not too small eigenvalues
         return posdef
 
 
     def update_parameters(self,mean=None,covar=None):
         #---this check should be skipped for efficiency if used often and safely
+        scaling=1 #the scaling of the distribution
         if mean is None:
             pass
         elif not mean.shape[0] == self.D:
@@ -28,23 +29,29 @@ class Gaussian_distribution():
         if covar is None:
             pass
         elif not ((covar.shape[0]==self.D and covar.shape[1]==self.D) and self.check_symmetric(covar)):
-            raise ValueError('The covariance matrice is not symmetric!')
+            raise ValueError('The covariance matrix is not symmetric!')
         elif not self.check_pos_def(covar):
-            print('Warning: matrix is not strictly positive definite')
+            print('Warning: covariance matrix is not strictly positive definite')
             print(covar)
             #try to make it positive definite
             ew=np.linalg.eigvals(covar)
             eps=-np.min(ew)+1e-1
-            print('eps: '+str(eps))
             diags=np.ones(self.D)*eps
             covar+=np.diag(diags)
             posdef=np.all(np.linalg.eigvals(covar) > 0)
             if not posdef:
-                print('covar still not strictly positive definite')
+                ValueError('covar still not strictly positive definite')
+            else:
+                print('could make the covariance matrix positive definite')
+                self.covar=covar
+                self.invcovar=np.linalg.inv(covar)
+                self.density_proportionalfactor=scaling*np.power(2*np.pi,-self.D/2)*np.power(np.linalg.det(self.covar),-1/2)
+                #self.density_proportionalfactor=1
         else:
             self.covar=covar
             self.invcovar=np.linalg.inv(covar)
-            self.density_proportionalfactor=np.power(2*np.pi,-self.D/2)*np.power(np.linalg.det(self.covar),-1/2)
+            self.density_proportionalfactor=scaling*np.power(2*np.pi,-self.D/2)*np.power(np.linalg.det(self.covar),-1/2)
+            #self.density_proportionalfactor=1
 
     def density(self,x):
         if x.shape[0]!=self.D:

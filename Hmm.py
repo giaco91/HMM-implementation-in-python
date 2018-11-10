@@ -9,18 +9,7 @@ from distributions import *
 import time
 
 
-#-----------notation-----------
-#K, number of hidden states
-#N, sequence size
-#D, size of ouput space
-#pi, initial distribution of hidden states
-#a, transition matrice of the MC
-#e, emission probability distributions for each state
-#x, hidden states
-#z, observations (data)
-#f[n,k]=p(z_1,...,z_n,x_n=k)
-#b[n,k]=p(z_n+1,...,z_N|x_n=k)
-
+eps=1e-8#protect zero division
 
 #super class
 class Hmm():
@@ -102,6 +91,64 @@ class Hmm():
             if p[i]<0:
                 check=False
         return check
+
+    def k_mean(self,sequences,K,rep=1,n_iter=1000):
+        #sequences is a list of sequences, which will then be concatenated
+        epsilon=1e-3 #convergence criterion
+
+        #-----concatenate sequences:
+        data=sequences[0]
+        for l in range(1,len(sequences)):
+            data=np.concatenate((data,sequences[l]))
+        N=data.shape[0]#amount of data
+        D=data.shape[1]#dimension of a data point
+
+        best_model=[]
+        #-----run k-means rep times
+        for rep in range(0,rep):
+        
+            #----init centroids:----
+            centroids=np.zeros((K,D))#allocate memory
+            mean=np.mean(data,axis=0)
+            sigma=np.std(data,axis=0)
+            #initialize centroids
+            for d in range(0,D):
+                centroids[:,d]=np.random.normal(mean[d],sigma[d],K)
+
+            #-----k-mean iterations----
+            print('start k-mean repetition: '+str(rep+1)+'...')
+            clusters = [[] for _ in range(K)]
+            #E-step: assign points to neaerest centroid
+            last_distance=1e10
+            new_distance=1e9
+            best_model=[centroids,clusters,last_distance]
+            iter=0
+            while last_distance-new_distance>epsilon and iter<n_iter:
+                last_distance=new_distance
+                new_distance=0
+                clusters = [[] for _ in range(K)]
+                for n in range(0,N):
+                    squared_distance=np.sum(np.power(data[n,:]-centroids[:,:],2),axis=1)#broadcasting
+                    #squared_distance = numpy.linalg.norm(data[n,:]-centroids[:,:])
+                    idx_min=np.argmin(squared_distance)
+                    clusters[idx_min].append(data[n,:].tolist())
+                    new_distance+=np.power(squared_distance[idx_min],1/2)
+
+                #M-step: move centroids to cluster center
+                for k in range(0,K):
+                    if clusters[k]:
+                        centroids[k,:]=np.mean(clusters[k],axis=0)
+                iter+=1
+                if np.mod(iter,5)==0:
+                    print('iter: '+str(iter))
+            if new_distance<best_model[2]:
+                best_model=[centroids,clusters,new_distance]
+
+        for k in range(0,K):
+            best_model[1][k]=np.asarray(best_model[1][k])
+
+        return best_model
+       
 
     def scaled_forward_recursion_step(self,f_s_n,z_n):
         #f_s_n, the forward message at sequence point n
@@ -192,7 +239,6 @@ class Hmm():
         for n in range(0,N-1):
             for k in range(0,self.K):
                 for l in range(0,self.K):
-                    #ceta[n,l,k]=f_s[n,l]*self.a[l,k]*b_s[n+1,k]*self.e[k,z_hot[n+1]]/c[n+1]
                     ceta[n,l,k]=f_s[n,l]*self.a[l,k]*b_s[n+1,k]*self.e[k][z[n+1]]/c[n+1]
 
         return g,ceta,LL
@@ -235,20 +281,23 @@ class Hmm():
             for s in range(0,S):
                 g_1_sum+=g_i[s][0,:]
                 g_partition+=np.sum(g_i[s][0,:])
-            self.pi=g_1_sum/g_partition
+            self.pi=g_1_sum/(g_partition+eps)
 
             #state tranistion matrix a
             ceta_s_sum=np.zeros((self.K,self.K))
-            g_s_sum=np.zeros(self.K)
+            g_s_sum=np.zeros(self.K)+1e-3
             for s in range(0,S):
                 ceta_sum=np.sum(ceta_i[s],axis=0)
                 ceta_s_sum+=ceta_sum
                 g_s_sum+=np.sum(ceta_sum,axis=1)
-            for k in range(0,self.K):
-                print('g_s_sum'+str(g_s_sum))
-                self.a[:,k]=ceta_s_sum[:,k]/g_s_sum[:]
+            #print('ceta_sum'+str(ceta_sum))
 
-            #emission distribution e
+            #update transition matrix
+            for k in range(0,self.K):
+                #print('g_s_sum'+str(g_s_sum))
+                self.a[:,k]=ceta_s_sum[:,k]/(g_s_sum[:]+eps)
+
+            #update emission distribution e
             self.m_step_emission(g_i,z)
             # occurence_s=np.zeros(self.K)
             # g_N_sum=np.zeros(self.K)
@@ -275,6 +324,7 @@ class Hmm():
             if current_time>print_time:
                 print('Epoch: '+str(iter)+', Training time: '+str(int(current_time))+'s, Likelihood: '+str(LL_s))
                 print_time=current_time+self.print_every
+            
             #----check consistency----
             # print('check g:' +str(1e-10>(N-1-np.sum(g))))
             # print('check ceta:' +str(1e-10>(N-1-np.sum(ceta))))        
@@ -284,340 +334,8 @@ class Hmm():
         print('Total training time: '+str(time.time()-start_time))
         return LL
 
-#The actual hmm-graphs are child classes.
-class Discrete_emission(Hmm):
-
-    def __init__(self,K,D,init_distr=None,trans_mat=None,emission_mat=None,print_every=5):
-        #---preprocess input-----
-        init_distr,trans_mat=self.check_input(K,init_distr,trans_mat,print_every)
-        if emission_mat is None:
-            #emission_mat=np.zeros((K,D))
-            emission_mat=[]
-            for k in range(0,K):
-                #emission_mat[k,:]=self.get_rp_vector(D)
-                emission_mat.append(self.get_rp_vector(D)) 
-        else:
-            #if emission_mat.shape[0]!=K or emission_mat.shape[1]!=D:
-            if len(emission_mat)!=K or emission_mat[0].shape[0]!=D:
-                raise ValueError('The shape of the transition matrix must be (K,D)!')
-            if not self.check_emission_mat(emission_mat):
-                raise ValueError('The given emission matrix is not a proper probability table!')
-        #------------------
-        Hmm.__init__(self,'discrete',K,init_distr,trans_mat,print_every)#init from super class HMM
-        #the emissions and its properties are subclass specific
-        self.e=emission_mat
-        self.D=D
-
-    def one_hot_decoding(self,z):
-        #shape of z: (n,o)
-        #assignes to each one-hot-vector an integer value
-        z_shape=z.shape
-        N=z.shape[0]
-        D=z.shape[1]
-        z_decoded=np.zeros(N)
-        for i in range(0,N):
-            k=0
-            for j in range(0,D):
-                if z[i,j]==1:
-                    k=j
-            z_decoded[i]=k
-        return z_decoded.astype(int)
-
-    def m_step_emission(self,g_i,z):
-        S=len(z)
-        occurence_s=np.zeros(self.K)
-        g_N_sum=np.zeros(self.K)
-        
-        for s in range(0,S):
-            g_N_sum+=np.sum(g_i[s],axis=0)    
-        for d in range(0,self.D):
-            occurence_s=0
-            for s in range(0,S):
-                occurence_s+=np.sum(g_i[s]*np.expand_dims(z[s][:,d], axis=1),axis=0)
-            #self.e[:,d]=occurence_s/g_N_sum
-            helper=occurence_s/g_N_sum
-            for i in range(0,self.K):
-                self.e[i][d]=helper[i]
-
-    def one_hot_encoding(self,z):
-        N=z.shape[0]
-        z_encoded=np.zeros((N,D)).astype(int)
-        for i in range(0,N):
-            z_encoded[i,z[i]]=1
-        return z_encoded
-
-
-    def check_emission_mat(self,e):
-        #this funktion checks a to be a allowed emission
-        #i.e. that it is a valid probability dirstibution for each k
-        # for k in range(0,e.shape[0]):
-        for k in range(0,len(e)):
-            if not self.check_probability_vec(e[k]):
-                return False
-        return True
-
-    def fit(self,z,n_iter):
-        return self.baumwelch(z,n_iter)
 
 
 
-    def sample_observation(self,z,L):
-        #pi,a,e, the model parameters
-        #z, an initial seed of observations
-        #L, the number of predicted points
-        #returns an oversvation sample
-
-        N=z.shape[0] #size of sequence
-        z_sampled=np.zeros((N+L,self.D))
-        z_sampled[0:N,:]=z
-        pred_distr=np.zeros(self.D) #pred_distr[k]=p(z_N+1=k|z)
-        pred_hidden=np.zeros(self.K) #pred_hidden[k]=p(z_N+1=k|x^N) 
-        
-        [f_s,c,Likelihood]=self.forward_scaled(z_sampled[0:N,:])
-        f_s=f_s[N-1,:]
-        for s in range(0,L):
-            pred_distr*=0
-            pred_hidden*=0
-            for k in range(0,self.K):
-                for l in range(0,self.K):
-                    pred_hidden[k]+=self.a[l,k]*f_s[l]
-                for d in range(0,self.D):
-                    #pred_distr[d]+=self.e[k,d]*pred_hidden[k]
-                    pred_distr[d]+=self.e[k][d]*pred_hidden[k]
-            z_sampled[N+s,np.argmax(pred_distr)]=1 #ML-sampling
-            [f_s,c]=self.scaled_forward_recursion_step(f_s,z_sampled[N+s,:])
-        return z_sampled
-
-    def viterbi(self,z):
-        #pi, initial distribution of hidden states
-        #a, transition matrice of the MC
-        #e, emission probability distributions for each state
-        #z, observations (data)
-        #This function returns the ML hidden path.
-        #Furthermore it returns the ML joint p(x^n,z^n). 
-
-        N=z.shape[0] #size of sequence
-        z=self.one_hot_decoding(z)
-
-        #Denote: 
-        #d[t,l]=max_x^{t-1}p(x^{t-1},x_t=l,z^n)
-        #T[n,l]=argmax_k{d[n-1,k]*a[k,l]}, the tracker
-        #x_ml = argmax_x^n{p(x^n,z^n)}
-
-        d=np.zeros((N,self.K))
-        T=np.zeros((N,self.K)).astype(int)#note: T[0,:] stays unused, but I still allocate it for convenience
-        x_ml=np.zeros((N)).astype(int)
-
-        #----forward to find ML------
-        #init
-        for k in range(0,self.K):
-            #d[0,k]=self.pi[k]*self.e[k,z[0]]
-            d[0,k]=self.pi[k]*self.e[k][z[0]]
-
-        #recursion
-        for n in range(1,N):
-            for l in range(0,self.K):
-                #d[n,l]=np.amax(d[n-1,:]*self.a[:,l])*self.e[l,z[n]]
-                d[n,l]=np.amax(d[n-1,:]*self.a[:,l])*self.e[l][z[n]]
-                T[n,l]=np.argmax(d[n-1,:]*self.a[:,l])
-        #ML
-        #ML=np.amax(d[N-1,:]*self.e[:,z[N-1]])
-        ML=d[N-1,0]*self.e[0][z[N-1]]
-        ML_amax=0
-        for i in range(0,self.K):
-            new_value=d[N-1,i]*self.e[i][z[N-1]]
-            if new_value>ML:
-                ML=new_value
-                ML_amax=i
-
-        #-------Backtracking to find maximizing path----
-        #init:
-        #x_ml[N-1]=np.argmax(d[N-1,:]*self.e[:,z[N-1]])
-        x_ml[N-1]=ML_amax
-        #recursion:
-        for i in range(1,N):
-            n=N-i-1
-            x_ml[n]=T[n+1,x_ml[n+1]]
-
-        return x_ml,ML
-
-
-
-
-class Gaussian_emission(Hmm):
-
-    def __init__(self,K,D,init_distr=None,trans_mat=None,means=None,covars=None,print_every=5):
-        #means and covars must be a list of np-arrays
-        #---preprocess input-----
-        init_distr,trans_mat=self.check_input(K,init_distr,trans_mat,print_every)
-        if means is None:
-            means=[]
-            for i in range(0,K):
-                means.append(self.get_rp_vector(D)) #should at least be init with k-mean on some data 
-        else:
-            if len(means)!=K or means[0].shape[0]!= D:
-                raise ValueError('The shape of the means must be a list of length K with arrays of shape D!')
-        if covars is None:
-            covars=[]
-            for i in range(0,K):
-                covar=np.random.rand(D,D)
-                covars.append(np.dot(covar,covar.transpose())) #better to initialize with scaling order of some data, e.g. GMM
-        else:
-            if len(covars)!=K or covars[0].shape[0]!=D or covars[0].shape[1]!=D:
-               raise ValueError('The shape of the covars must be a list of length K containing arrays of shape (D,D)!')
-            for i in range(0,K):
-                if not self.check_symmetric_and_posdef(covars[i]):
-                    raise ValueError('At least one of the covariance matrices is not symmetric and positive definite!')
-        #------------------
-        Hmm.__init__(self,'continuous',K,init_distr,trans_mat,print_every)#init from super class HMM
-        #the emissions and its properties are subclass specific
-        e=[]
-        for i in range(0,K):
-            e.append(Gaussian_distribution(means[i],covars[i]))
-        self.e=e
-        self.D=D
-
-    def fit(self,z,n_iter):
-        return self.baumwelch(z,n_iter)
-
-    def forward_scaled(self,z):
-        #pi, initial distribution of hidden states
-        #a, transition matrice of the MC
-        #e, emission probability distributions for each state
-        #z, observations (data)
-        #This function returns the forward messages and the Likelihood
-
-        N=z.shape[0] #size of sequence
-        f_s=np.zeros((N,self.K)) #allocate memory for scaled forward messages
-        #note that f_s[:,n] is a probability vector, namely, p(z_n|z_1,...,z_n-1)
-        c=np.zeros(N) #scaling factors
-
-        #initialize first message
-        for k in range(0,self.K):
-            f_s[0,k]=self.e[k].density(z[0])*self.pi[k]
-            c[0]+=f_s[0,k]
-        f_s[0,:]=f_s[0,:]/c[0]
-
-        #forward propagation
-        c_n_times_f_s=np.zeros(self.K)
-        for n in range(1,N):
-            for l in range(0,self.K):
-                L_prev=0
-                for k in range(0,self.K):
-                    L_prev+=f_s[n-1,k]*self.a[k,l]
-                #c_n_times_f_s[l]=self.e[l,z_hot[n]]*L_prev
-                c_n_times_f_s[l]=self.e[l].density(z[n])*L_prev
-            c[n]=np.sum(c_n_times_f_s) #c_n is the normalizing coefficient
-            f_s[n,:]=c_n_times_f_s/c[n]
-
-        L=np.prod(c)
-        return f_s,c,L
-
-    def backward_scaled(self,z,c):
-        #a, transition matrice of the MC
-        #e, emission probability distributions for each state
-        #z, observations (data)
-        #This function returns the scaled backward messages
-        # c, the scaling factors computed in the forward phase
-        z_shape=z.shape
-        N=z.shape[0] #size of sequence
-        b_s=np.zeros((N,self.K)) #allocate memory for scaled backward messages
-
-        #initialize first message
-        b_s[N-1,:]=1 
-
-        #backward propagation
-        for n in range(1,N):
-            for l in range(0,self.K):
-                for k in range(0,self.K):
-                    #b_s[N-n-1,l]+=self.e[k,z_hot[N-n]]*b_s[N-n,k]*self.a[l,k]
-                    b_s[N-n-1,l]+=self.e[k].density(z[N-n])*b_s[N-n,k]*self.a[l,k]
-            b_s[N-n-1,:]/=c[N-n]
-
-        return b_s
-
-    def get_gamma_ceta(self,z):
-        #z must be a sequence (unwrapped from the list)
-        N=z.shape[0] #sequence length
-        [f_s,c,L]=self.forward_scaled(z)
-        LL=np.log(L)
-        b_s=self.backward_scaled(z,c)
-
-        g=f_s*b_s
-        ceta=np.zeros((N,self.K,self.K))
-        for n in range(0,N-1):
-            for k in range(0,self.K):
-                for l in range(0,self.K):
-                    ceta[n,l,k]=f_s[n,l]*self.a[l,k]*b_s[n+1,k]*self.e[k].density(z[n+1])/c[n+1]
-
-        return g,ceta,LL
-
-    def m_step_emission(self,g_i,z):
-        S=len(z)
-        occurence_s=np.zeros(self.K)
-        g_N_sum=np.zeros(self.K)
-
-        for s in range(0,S):
-            g_N_sum+=np.sum(g_i[s],axis=0) #the sum in the denominator
-
-    #---update means--- 
-        for k in range(0,self.K):
-            enumerator_mean=0
-            for s in range(0,S):
-                for ns in range(0,g_i[s].shape[0]):
-                    enumerator_mean+=g_i[s][ns,k]*z[s][ns,:]
-            self.e[k].update_parameters(mean=enumerator_mean/g_N_sum[k])
-
-    #---update covar with updated mean--- 
-        for k in range(0,self.K):
-            enumerator_covar=0
-            for s in range(0,S):
-                for ns in range(0,g_i[s].shape[0]):
-                    derivation=z[s][ns,:]-self.e[k].mean
-                    enumerator_covar+=g_i[s][ns,k]*np.outer(derivation,derivation)
-            self.e[k].update_parameters(covar=enumerator_covar/g_N_sum[k])
-
-    def sample_observation(self,z,L):
-        #pi,a,e, the model parameters
-        #z, an initial seed of observations
-        #L, the number of predicted points
-        #returns an oversvation sample
-
-        N=z.shape[0] #size of sequence
-        z_sampled=np.zeros((N+L,self.D))
-        z_sampled[0:N,:]=z
-        likelihood_of_means=np.zeros(self.K) #pred_distr[k]=p(z_N+1=k|z)
-        pred_hidden=np.zeros(self.K) #pred_hidden[k]=p(z_N+1=k|x^N) 
-        
-        [f_s,c,Likelihood]=self.forward_scaled(z_sampled[0:N,:])
-        f_s=f_s[N-1,:]
-        for s in range(0,L):
-            likelihood_of_means*=0
-            pred_hidden*=0
-            for k in range(0,self.K):
-                for l in range(0,self.K):
-                    pred_hidden[k]+=self.a[l,k]*f_s[l]
-                #Heurestic ML-sampling (assuming)
-                likelihood_of_means[k]=self.e[k].density(self.e[k].mean)*pred_hidden[k]
-            k_max=np.argmax(likelihood_of_means)
-            z_sampled[N+s,:]=self.e[np.argmax(likelihood_of_means)].mean
-            [f_s,c]=self.scaled_forward_recursion_step(f_s,z_sampled[N+s,:])
-        return z_sampled
-
-
-    def scaled_forward_recursion_step(self,f_s_n,z_n):
-        #f_s_n, the forward message at sequence point n
-        #z_n,the n-th observation
-        #K=f_s_n.shape[0]
-        c_n_times_f_s=np.zeros(self.K)
-        for l in range(0,self.K):
-            L_prev=0
-            for k in range(0,self.K):
-                L_prev+=f_s_n[k]*self.a[k,l]
-            #c_n_times_f_s[l]=self.e[l,np.argmax(z_n)]*L_prev
-            c_n_times_f_s[l]=self.e[l].density(z_n)*L_prev
-        c=np.sum(c_n_times_f_s)
-        f_s_np1=c_n_times_f_s/c
-        return f_s_np1,c 
 
     
