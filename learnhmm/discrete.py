@@ -5,11 +5,13 @@
 #------------------------------------------------------------------------
 
 import numpy as np
-from distributions import *
+#from distributions import *
 import time
+from learnhmm.hmm import Hmm
 
+#help(learnhmm)
 
-from hmm import *
+#from hmm import Hmm
 
 #-----------notation-----------
 #K, number of hidden states

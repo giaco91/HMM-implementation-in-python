@@ -5,7 +5,7 @@
 #------------------------------------------------------------------------
 
 import numpy as np
-from distributions import *
+from learnhmm import distributions
 import time
 
 

@@ -4,9 +4,11 @@ import os
 from BW_utility import *
 
 #import test_hmm_package as hmm_pk
-from hmm import *
-from discrete import *
-from gaussian import *
+# from hmm import *
+# from discrete import *
+# from gaussian import *
+from learnhmm import *
+
 
 from mpl_toolkits import mplot3d
 import matplotlib.pyplot as plt
@@ -38,7 +40,7 @@ print(z[0].shape)
 # plt.scatter(centroids[:,0],centroids[:,1],color='red')
 # plt.show()
 
-hmm_gauss=Gaussian_emission(K=12,D=z[0].shape[1])
+hmm_gauss=gaussian.Gaussian_emission(K=5,D=z[0].shape[1])
 LL=hmm_gauss.fit(z,8,init='k_mean')
 print(LL[-1])
 # print(hmm_gauss.e[0].mean)

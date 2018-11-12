@@ -5,11 +5,10 @@
 #------------------------------------------------------------------------
 
 import numpy as np
-from distributions import *
+from learnhmm.hmm import Hmm
+from learnhmm.distributions import Gaussian_distribution
+
 import time
-
-
-from hmm import *
 
 
 eps=0 #protect zero divition
