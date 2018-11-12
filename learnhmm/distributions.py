@@ -32,7 +32,6 @@ class Gaussian_distribution():
             raise ValueError('The covariance matrix is not symmetric!')
         elif not self.check_pos_def(covar):
             print('Warning: covariance matrix is not strictly positive definite')
-            print(covar)
             #try to make it positive definite
             ew=np.linalg.eigvals(covar)
             eps=-np.min(ew)+1e-1

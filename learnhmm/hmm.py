@@ -322,7 +322,7 @@ class Hmm():
 
             current_time=time.time()-start_time
             if current_time>print_time:
-                print('Epoch: '+str(iter)+', Training time: '+str(int(current_time))+'s, Likelihood: '+str(LL_s))
+                print('Epoch: '+str(iter)+', Training time: '+str(int(current_time))+'s, Likelihood: '+str(LL[iter+1]))
                 print_time=current_time+self.print_every
             
             #----check consistency----

@@ -41,7 +41,7 @@ print(z[0].shape)
 # plt.show()
 
 hmm_gauss=gaussian.Gaussian_emission(K=5,D=z[0].shape[1])
-LL=hmm_gauss.fit(z,8,init='k_mean')
+LL=hmm_gauss.fit(z[0:100],80,init='k_mean')
 print(LL[-1])
 # print(hmm_gauss.e[0].mean)
 # print(hmm_gauss.e[1].mean)

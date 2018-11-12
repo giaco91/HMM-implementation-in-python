@@ -54,7 +54,7 @@ class Gaussian_emission(Hmm):
                 #calculate variance of clusters
                 variances_k=np.var(clusters[k],axis=0)
                 covar_k=np.diag(variances_k)
-                self.e[k].covar=covar_k*100
+                self.e[k].covar=covar_k*1000
         print('Start Baum-Welch...')
         return self.baumwelch(z,n_iter)
 
@@ -104,6 +104,10 @@ class Gaussian_emission(Hmm):
                 raise ValueError('nan error')
 
         LL=np.sum(np.log(c))
+        if LL>0:
+            print('Warning: The Likelihood of a sequence is larger than one!')
+            print('LL'+str(LL))
+            print('the c: '+str(c))
         return f_s,c,LL
 
     def backward_scaled(self,z,c):
@@ -182,7 +186,6 @@ class Gaussian_emission(Hmm):
                     mean_new+=self.e[j].mean
                     covar_new+=self.e[j].covar
                 covar=covar_new/(self.K-1)
-                print(covar)
                 self.e[k].update_parameters(mean=mean_new/self.K)
 
             self.e[k].update_parameters(covar=covar)
